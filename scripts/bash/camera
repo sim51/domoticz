@@ -1,0 +1,66 @@
+#!/bin/bash
+
+# Synology camera activation (via the home mode)
+URL=$1
+LOGIN=$2
+PASSWORD=$3
+
+login(){
+  curl -0 -A '' -k --max-time 5  -s "$URL/webapi/auth.cgi?api=SYNO.API.Auth&method=Login&version=2&account=$LOGIN&passwd=$PASSWORD&session=SurveillanceStation&format=sid" | jq '.data.sid'
+}
+
+make_call(){
+  SID=$1
+  METHOD=$2
+  DATA=$3
+  curl -0 -A '' -k --max-time 5 -s "$URL/webapi/entry.cgi?api=SYNO.SurveillanceStation.HomeMode&version=1&method=$METHOD$DATA&_sid=$SID"
+}
+
+status() {
+  SID=$(login)
+  STATUS=$(make_call $SID "GetInfo" "" | jq -r '.data.on' | sed 's/false/On/g' | sed 's/true/Off/g')
+  echo "{\"status\":\"$STATUS\"}"
+}
+
+on(){
+  SID=$(login)
+  RESULT=$(make_call $SID "Switch" "&on=false" | jq '.success')
+  echo "{\"success\":true}"
+}
+
+off(){
+  SID=$(login)
+  RESULT=$(make_call $SID "Switch" "&on=true" | jq '.success')
+  echo "{\"success\":true}"
+}
+
+
+toggle(){
+  STATUS=$(status | jq -r '.status')
+  if [ "$STATUS" != "On" ]
+  then
+    RES=$(on)
+  else
+    RES=$(off)
+  fi
+  status
+}
+
+case "$4" in 
+  on|On|ON)
+    on
+    ;;
+  off|Off|OFF)
+    off
+    ;;
+  status)
+    status
+    ;;
+  toggle)
+    toggle
+    ;;
+  *)
+    echo $"Usage: $0 {url} {login} {password} {status|on|off|toggle}"
+esac
+
+exit 0

@@ -1,0 +1,14 @@
+#!/bin/bash
+
+IP=$1
+
+RESULT=$(ping -c1 $IP | grep '1 received, 0% packet loss')
+
+if [ "$RESULT" != "" ]; then
+  echo "{\"status\":\"On\"}"
+else
+  echo "{\"status\":\"Off\"}"
+fi
+
+exit 0
+ 

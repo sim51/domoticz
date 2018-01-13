@@ -1,0 +1,134 @@
+#!/bin/bash
+
+IP=$1
+PORTS=(49153 49154 49151 49155 49156 49157 49158 49159)
+
+EVENT_PATH="/upnp/control/basicevent1"
+EVENT_URN="Belkin:service:basicevent:1"
+INSIGHT_PATH="/upnp/control/insight1"
+INSIGHT_URN="Belkin:service:insight:1"
+
+find_port() {
+  i=0
+  PORT=0
+  while [[ $PORT -le 0 && $i -le ${#PORTS[@]} ]]
+  do
+    PORTTEST=$(curl --max-time 1 -s $IP:${PORTS[$i]} | grep "404")
+    if [ "$PORTTEST" = "" ]
+    then
+      i=$[$i+1]
+    else
+      PORT=${PORTS[$i]}
+    fi
+  done
+  echo $PORT
+}
+
+make_call() {
+  URI=$1
+  URN=$2
+  ACTION=$3
+  DATA=$4
+  PORT=$(find_port)
+  curl http://$IP:$PORT$URI \
+       -0 \
+       -A '' \
+       -X POST \
+       --max-time 5 \
+       -s \
+       -H 'Accept: ' \
+       -H 'Content-type: text/xml; charset="utf-8"' \
+       -H "SOAPACTION: \"urn:$URN#$ACTION\"" \
+       -d "<?xml version=\"1.0\" encoding=\"utf-8\"?> \
+           <s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\"> \
+             <s:Body> \
+               <u:$ACTION xmlns:u=\"urn:$URN\">$DATA</u:$ACTION> \
+             </s:Body> \
+           </s:Envelope>"
+}
+
+name() {
+  RESULT=$(make_call $EVENT_PATH $EVENT_URN "GetFriendlyName" "")
+  NAME=$(echo "$RESULT" | grep "<FriendlyName"  | cut -d">" -f2 | cut -d "<" -f1)
+  echo "{\"name\":\"$NAME\"}"
+}
+
+data(){
+ RESULT=$(make_call $INSIGHT_PATH $INSIGHT_URN "GetInsightParams" "")
+ DATA=$(echo "$RESULT" | grep "<InsightParams"  | cut -d">" -f2 | cut -d "<" -f1)
+ 
+ STATUS=$(cut -d '|' -f1 <<< "$DATA" | sed 's/0/Off/g' | sed 's/1/On/g')
+ # timestamp
+ ON_SINCE=$(cut -d '|' -f2 <<< "$DATA")
+ # in second
+ ON_FOR=$(cut -d '|' -f3 <<< "$DATA")
+ # in second
+ TODAY_ON_TIME=$(cut -d '|' -f4 <<< "$DATA")
+ # power consumer today (mW per minute)
+ TODAY_CONSUMED=$(cut -d '|' -f9 <<< "$DATA")
+ # power consumer today (in mW)
+ CONSUMPTION=$(cut -d '|' -f8 <<< "$DATA")
+ 
+ echo "\
+ { \
+    \"status\":\"$STATUS\", \
+    \"on_since\":\"$ON_SINCE\", \
+    \"on_for\":\"$ON_FOR\", \
+    \"today_on_time\":\"$TODAY_ON_TIME\", \
+    \"today_consumption\":\"$TODAY_CONSUMED\", \
+    \"consumption\":$CONSUMPTION, \
+    \"raw\":\"$DATA\" \
+ }"
+}
+
+status(){
+  RESULT=$(make_call $EVENT_PATH $EVENT_URN "GetBinaryState" "")
+  STATUS=$(echo "$RESULT" | grep "<BinaryState"  | cut -d">" -f2 | cut -d "<" -f1 | sed 's/0/Off/g' | sed 's/1/On/g')
+  echo "{\"status\":\"$STATUS\"}"
+}
+
+on(){
+  RESULT=$(make_call $EVENT_PATH $EVENT_URN "SetBinaryState" "<BinaryState>1</BinaryState>")
+  echo "{\"success\":true}"
+}
+
+off(){
+  RESULT=$(make_call $EVENT_PATH $EVENT_URN "SetBinaryState" "<BinaryState>0</BinaryState>")
+  echo "{\"success\":true}"
+}
+
+toggle(){
+  STATUS=$(status | jq -r '.status')
+  if [ "$STATUS" != "On" ]
+  then
+    on
+  else
+    off
+  fi
+}
+
+case "$2" in
+    name)
+        name
+        ;;
+    data)
+        data
+        ;;
+    status)
+        status
+        ;;
+    on|On|ON)
+        on
+        ;;
+    off|Off|OFF)
+        off
+        ;;
+    toggle)
+        toggle
+        ;;
+    *)
+        echo $"Usage: $0 {IP} {name|data|status|on|off|toggle}"
+esac
+
+exit 0
+
